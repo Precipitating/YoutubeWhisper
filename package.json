@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@timur00kh/whisper.wasm": "^0.0.7-canary.af8cb6a"
+  }
+}
