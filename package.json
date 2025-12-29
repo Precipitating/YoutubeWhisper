@@ -1,5 +1,13 @@
 {
+  "scripts": {
+    "start": "rollup -c"
+  },
   "dependencies": {
     "@timur00kh/whisper.wasm": "^0.0.7-canary.af8cb6a"
+  },
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^29.0.0",
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "rollup": "^4.54.0"
   }
 }
