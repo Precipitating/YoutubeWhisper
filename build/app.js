@@ -619,10 +619,17 @@
   let enabled = false;
   let whisper = null;
   let modelManager = null;
+  let audioContext = null;
+  let preNode = null;
+  let session = null;
+  let transcribing = false;
+  let stack = [];
+  const URL$1 = browser.runtime.getURL("src/audiopreprocessor.js");
 
   function LoadWhisper() {
     whisper = new A({ logLevel: 1 });
     modelManager = new F();
+    session = whisper.createSession();
   }
 
   async function BrowserCompatible() {
@@ -651,54 +658,98 @@
     return document.querySelector("video");
   }
 
-  function EnabledStateChanged() {
-    if (enabled) {
-      StartStreamingTranscription();
-    }
-  }
-
   function SetListeners() {
+    console.log("Setting listeners!");
     const video = GetVideo();
-    const enableButton = document.getElementById("enableButton");
+    //const enableButton = document.getElementById("enableButton");
     video.addEventListener("play", () => {
       console.log("Video playing");
       enabled = true;
-      EnabledStateChanged();
+      StartStreamingTranscription();
     });
 
     video.addEventListener("pause", () => {
       console.log("Video paused");
       enabled = false;
-      EnabledStateChanged();
+      stack.length = 0;
     });
+  }
 
-    enableButton.addEventListener("click", () => {
-      console.log("Button clicked!");
-    });
+  async function GetAudioStream(video) {
+    if (audioContext && preNode) {
+      return;
+    }
+    audioContext = new AudioContext();
+    await audioContext.audioWorklet.addModule(URL$1);
+    preNode = new AudioWorkletNode(audioContext, "audiopreprocessor");
 
+    const stream = video.captureStream
+      ? video.captureStream()
+      : video.mozCaptureStreamUntilEnded();
+    console.log(stream);
+    if (!video.captureStream) {
+      const dest = audioContext.createMediaStreamSource(stream);
+      dest.connect(preNode);
+      dest.connect(audioContext.destination);
+    }
+
+    preNode.connect(audioContext.destination);
     console.log("Listeners linked");
   }
 
-  async function StartStreamingTranscription() {
-    if (!enabled) {
-      return;
-    }
-    const session = whisper.createSession();
-    const stream = session.streaming(audioData, {
-      language: "en",
-      threads: 4,
-      translate: false,
-      sleepMsBetweenChunks: 100,
-    });
+  async function processQueue() {
+    if (transcribing) return;
+    if (stack.length <= 0) return;
 
-    for await (const segment of stream) {
-      if (!enabled) {
-        return;
+    transcribing = true;
+
+
+    const first = stack.shift();
+
+    try {
+      const currStream = session.streamimg(first, {
+        language: "en",
+        threads: 4,
+        translate: false,
+        sleepMsBetweenChunks: 1000,
+      });
+
+     const unwrappedStream = currStream.wrappedJSObject;
+
+      for await (const segment of unwrappedStream) {
+        console.log(
+          `[${segment.timeStart}ms - ${segment.timeEnd}ms]: ${segment.text}`
+        );
       }
-      console.log(
-        `[${segment.timeStart}ms - ${segment.timeEnd}ms]: ${segment.text}`
-      );
+
+      transcribing = false;
+    } catch (err) {
+      console.error(err);
+    } finally {
+
+      processQueue();
     }
+  }
+
+  async function StartStreamingTranscription() {
+    if (!enabled || !IsFocusedOnVideo()) return;
+
+    const video = GetVideo();
+    if (!video) throw new Error("No video element found");
+
+    await GetAudioStream(video);
+
+    if (!preNode) return;
+
+    console.log("Prenode found!");
+    preNode.port.onmessage = async (e) => {
+      stack.push(e.data);
+      processQueue();
+    };
+  }
+
+  function IsFocusedOnVideo() {
+    return document.visibilityState === "visible" && document.hasFocus();
   }
 
   async function Initialize() {
@@ -707,9 +758,7 @@
       LoadWhisper();
       await BrowserCompatible();
       await LoadModel(ModelTypes.tiny);
-      document.addEventListener("DOMContentLoaded", () => {
-        SetListeners();
-      });
+      SetListeners();
     } catch (err) {
       console.error("Initialization failed:", err);
     }

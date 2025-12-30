@@ -11,10 +11,19 @@ const ModelTypes = {
 let enabled = false;
 let whisper = null;
 let modelManager = null;
+let audioContext = null;
+let preNode = null;
+let stream = null;
+let audio16kStream = null;
+let session = null;
+let transcribing = false;
+let stack = [];
+const URL = browser.runtime.getURL("src/audiopreprocessor.js");
 
 function LoadWhisper() {
   whisper = new WhisperWasmService({ logLevel: 1 });
   modelManager = new ModelManager();
+  session = whisper.createSession();
 }
 
 async function BrowserCompatible() {
@@ -55,84 +64,93 @@ function EnabledStateChanged() {
 }
 
 function SetListeners() {
+  console.log("Setting listeners!");
   const video = GetVideo();
-  const enableButton = document.getElementById("enableButton");
+  //const enableButton = document.getElementById("enableButton");
   video.addEventListener("play", () => {
     console.log("Video playing");
     enabled = true;
-    EnabledStateChanged();
+    StartStreamingTranscription();
   });
 
   video.addEventListener("pause", () => {
     console.log("Video paused");
     enabled = false;
-    EnabledStateChanged();
+    stream = false;
+    audio16kStream = null;
+    stack.length = 0;
   });
+}
 
-  enableButton.addEventListener("click", () => {
-    console.log("Button clicked!");
-  });
+async function GetAudioStream(video) {
+  if (audioContext && preNode) {
+    return;
+  }
+  audioContext = new AudioContext();
+  await audioContext.audioWorklet.addModule(URL);
+  preNode = new AudioWorkletNode(audioContext, "audiopreprocessor");
 
+  const stream = video.captureStream
+    ? video.captureStream()
+    : video.mozCaptureStreamUntilEnded();
+  console.log(stream);
+  if (!video.captureStream) {
+    const dest = audioContext.createMediaStreamSource(stream);
+    dest.connect(preNode);
+    dest.connect(audioContext.destination);
+  }
+
+  preNode.connect(audioContext.destination);
   console.log("Listeners linked");
 }
 
-function ResampleTo16kHZ(audioData, origSampleRate = 44100) {
-  // Convert the audio data to a Float32Array
-  const data = new Float32Array(audioData);
+async function processQueue() {
+  if (transcribing) return;
+  if (stack.length <= 0) return;
 
-  // Calculate the desired length of the resampled data
-  const targetLength = Math.round(data.length * (16000 / origSampleRate));
+  transcribing = true;
 
-  // Create a new Float32Array for the resampled data
-  const resampledData = new Float32Array(targetLength);
 
-  // Calculate the spring factor and initialize the first and last values
-  const springFactor = (data.length - 1) / (targetLength - 1);
-  resampledData[0] = data[0];
-  resampledData[targetLength - 1] = data[data.length - 1];
+  const first = stack.shift();
 
-  // Resample the audio data
-  for (let i = 1; i < targetLength - 1; i++) {
-    const index = i * springFactor;
-    const leftIndex = Math.floor(index).toFixed();
-    const rightIndex = Math.ceil(index).toFixed();
-    const fraction = index - leftIndex;
-    resampledData[i] = data[leftIndex] + (data[rightIndex] - data[leftIndex]) * fraction;
+  try {
+    const currStream = session.streamimg(first, {
+      language: "en",
+      threads: 4,
+      translate: false,
+      sleepMsBetweenChunks: 1000,
+    });
+
+    for await (const segment of currStream) {
+      console.log(
+        `[${segment.timeStart}ms - ${segment.timeEnd}ms]: ${segment.text}`
+      );
+    }
+
+    transcribing = false;
+  } catch (err) {
+    console.error(err);
+  } finally {
+
+    processQueue();
   }
-
-  // Return the resampled data
-  return resampledData;
 }
 
 async function StartStreamingTranscription() {
-  if (!enabled || !IsFocusedOnVideo()) {
-    return;
-  }
+  if (!enabled || !IsFocusedOnVideo()) return;
 
-  // get audio data
   const video = GetVideo();
-  const audioStream = video.captureStream();
-  const audioContext = new AudioContext();
-  const source = audioContext.createMediaStreamSource(stream);
+  if (!video) throw new Error("No video element found");
 
-  const session = whisper.createSession();
-  const stream = session.streaming(audioData, {
-    language: "en",
-    threads: 4,
-    translate: false,
-    sleepMsBetweenChunks: 100,
-  });
+  await GetAudioStream(video);
 
-  
+  if (!preNode) return;
 
-  for await (const segment of stream) {
-    if (!enabled) {
-      return;
-    }
-    console.log(
-      `[${segment.timeStart}ms - ${segment.timeEnd}ms]: ${segment.text}`
-    );
-  }
+  console.log("Prenode found!");
+  preNode.port.onmessage = async (e) => {
+    stack.push(e.data);
+    processQueue();
+  };
 }
 
 function IsFocusedOnVideo() {
@@ -145,9 +163,7 @@ async function Initialize() {
     LoadWhisper();
     await BrowserCompatible();
     await LoadModel(ModelTypes.tiny);
-    document.addEventListener("DOMContentLoaded", () => {
-      SetListeners();
-    });
+    SetListeners();
   } catch (err) {
     console.error("Initialization failed:", err);
   }
