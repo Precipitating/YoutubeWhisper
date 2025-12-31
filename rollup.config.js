@@ -1,11 +1,15 @@
 import resolve from "@rollup/plugin-node-resolve";
 import commonjs from "@rollup/plugin-commonjs";
 export default {
-  input: "src/app.js",   
+  
+  input:{
+    content: "src/content.js", 
+    background: "src/background.js",
+  },
   output: {
-    file: "build/app.js", 
-    format: "iife",
-    inlineDynamicImports: true
+    dir: "build", 
+    format: "es",
+
   },
   plugins: [
     resolve({ browser: true }),
