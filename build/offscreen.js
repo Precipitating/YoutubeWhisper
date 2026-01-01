@@ -615,13 +615,7 @@ let whisper = null;
 let modelManager = null;
 let session = null;
 let transcribing = false;
-const ttsOptions = {
-  language: "en",
-  threads: 4,
-  translate: false,
-  sleepMsBetweenChunks: 100
-};
-let segments = [];
+const URL = chrome.runtime.getURL("src/audiopreprocessor.js");
 function LoadWhisper() {
   whisper = new A({ logLevel: 1 });
   modelManager = new F();
@@ -638,6 +632,45 @@ async function BrowserCompatible() {
   }
 }
 
+/**
+ * Captures audio from the active tab in Google Chrome.
+ * @returns {Promise<MediaStream>} A promise that resolves with the captured audio stream.
+ */
+function captureTabAudio() {
+  return new Promise((resolve) => {
+    chrome.tabCapture.capture(
+      {
+        audio: true,
+        video: false,
+      },
+      (stream) => {
+        resolve(stream);
+      }
+    );
+  });
+}
+
+function CleanupAudio() {
+  if (preNode) {
+    preNode.port.onmessage = null;
+    preNode.disconnect();
+    preNode = null;
+  }
+
+  if (audioContext) {
+    audioContext.close();
+    audioContext = null;
+  }
+
+  if (currentStream) {
+    currentStream.getTracks().forEach((track) => {
+      track.stop();
+      console.log("Stopped track:", track.kind);
+    });
+    currentStream = null;
+  }
+}
+
 async function LoadModel(model) {
   console.log("Loading Whisper model...");
   try {
@@ -651,6 +684,46 @@ async function LoadModel(model) {
   }
 }
 
+async function InitAudioWorklet(stream) {
+  audioContext = new AudioContext();
+  if (audioContext.state === "suspended") {
+    await audioContext.resume();
+  }
+
+  try {
+    await audioContext.audioWorklet.addModule(URL);
+    preNode = new AudioWorkletNode(audioContext, "audiopreprocessor");
+    const mediaStream = audioContext.createMediaStreamSource(stream);
+
+    mediaStream.connect(preNode);
+    preNode.connect(audioContext.destination);
+    preNode.port.onmessage = (event) => {
+      const data = event.data;
+      const audio16k = data; // Float32Array @ 16 kHz
+      const wordStream = session.streamimg(audio16k, options);
+    };
+  } catch (error) {
+    console.error("Error initializing AudioWorklet:", error);
+    throw error;
+  }
+}
+async function GetAudioData() {
+  const stream = await captureTabAudio();
+  if (stream) {
+    currentStream = stream;
+    stream.oninactive = () => {
+      CleanupAudio();
+      window.close();
+    };
+
+    try {
+      await InitAudioWorklet(stream);
+    } catch (error) {
+      console.error("Failed to initialize AudioWorklet:", error);
+      return;
+    }
+  }
+}
 async function Initialize() {
   try {
     console.log("Initializing YoutubeWhisper");
@@ -664,29 +737,17 @@ async function Initialize() {
 
 Initialize();
 
-browser.runtime.onConnect.addListener((port) => {
+chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "transcription") return;
 
   port.onMessage.addListener(async (msg) => {
     if (transcribing) return;
-    if (msg.type == "TRANSCRIBE") {
+    if (msg.type == "VIDEO_PLAY") {
       transcribing = true;
       console.log("Transcribing");
-      try {
-        const stream = session.streamimg(msg.audioData, ttsOptions);
-        console.log("Stream gained");
-        for await (const segment of stream) {
-        segments.push(segment);
-        }
-    
-
-
-      } catch (err) {
-        console.log(err);
-      }
-
+      await GetAudioData();
       console.log("Done transcribing");
-    //transcribing = false;
+      //transcribing = false;
     }
   });
 });

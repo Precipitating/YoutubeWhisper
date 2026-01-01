@@ -3,8 +3,7 @@ import commonjs from "@rollup/plugin-commonjs";
 export default {
   
   input:{
-    content: "src/content.js", 
-    background: "src/background.js",
+    offscreen: "src/offscreen.js",
   },
   output: {
     dir: "build", 

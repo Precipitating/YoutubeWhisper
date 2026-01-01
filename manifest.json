@@ -1,28 +1,35 @@
 {
-  "description": "Utilizes whisper to transcribe videos",
-  "manifest_version": 2,
+  "manifest_version": 3,
   "name": "YoutubeWhisper",
   "version": "1.0",
-  "browser_action": {
-    "default_popup": "src/app.html"
-  },
-  "permissions": [
-    "storage"
-  ],
+  "description": "Utilizes whisper to transcribe videos",
 
-  "web_accessible_resources": ["src/audiopreprocessor.js"],
+  "action": {
+    "default_popup": "src/popup.html"
+  },
+
+  "permissions": ["storage", "activeTab", "tabCapture", "scripting", "offscreen"],
+  "host_permissions": ["*://www.youtube.com/*"],
 
   "background": {
-    "scripts": ["build/background.js"],
-    "type": "module"
+    "service_worker": "src/background.js"
   },
 
   "content_scripts": [
     {
       "matches": ["*://www.youtube.com/watch*"],
-      "js": ["build/content.js"]
+      "js": ["src/content.js"]
     }
   ],
 
-  "content_security_policy": "script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; worker-src 'self' blob:; object-src 'self'"
+  "web_accessible_resources": [
+    {
+      "resources": ["src/audiopreprocessor.js"],
+      "matches": ["*://www.youtube.com/*"]
+    }
+  ],
+
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  }
 }

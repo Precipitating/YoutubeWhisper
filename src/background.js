@@ -1,89 +1,62 @@
-import { WhisperWasmService, ModelManager } from "@timur00kh/whisper.wasm";
+let creatingOffscreen = null;
 
-const ModelTypes = {
-  tiny: "tiny",
-  small: "small",
-  base: "base",
-  medium: "medium",
-  large: "large",
-};
-let whisper = null;
-let modelManager = null;
-let session = null;
-let transcribing = false;
-const mockAudioData = new Float32Array(16000);
-const ttsOptions = {
-  language: "en",
-  threads: 4,
-  translate: false,
-  sleepMsBetweenChunks: 100
-};
-let segments = [];
-function LoadWhisper() {
-  whisper = new WhisperWasmService({ logLevel: 1 });
-  modelManager = new ModelManager();
-  session = whisper.createSession();
-  console.log(session);
-}
+async function EnsureOffscreen() {
+  const offscreenUrl = chrome.runtime.getURL("build/offscreen.html");
 
-async function BrowserCompatible() {
-  const isSupported = await whisper.checkWasmSupport();
-  if (!isSupported) {
-    throw new Error("WebAssembly is not supported");
-  } else {
-    console.log("Browser compatible with Whisper");
-  }
-}
-
-async function LoadModel(model) {
-  console.log("Loading Whisper model...");
-  try {
-    const modelData = await modelManager.loadModel(model, true, (progress) => {
-      console.log(`Loading progress: ${progress}%`);
+  // Check if offscreen document already exists
+  if ("getContexts" in chrome.runtime) {
+    const contexts = await chrome.runtime.getContexts({
+      contextTypes: ["OFFSCREEN_DOCUMENT"],
+      documentUrls: [offscreenUrl],
     });
-    await whisper.initModel(modelData);
-    console.log("Whisper loaded");
-  } catch (err) {
-    console.log(err);
-  }
-}
 
-async function Initialize() {
-  try {
-    console.log("Initializing YoutubeWhisper");
-    LoadWhisper();
-    await BrowserCompatible();
-    await LoadModel(ModelTypes.tiny);
-  } catch (err) {
-    console.error("Initialization failed:", err);
-  }
-}
-
-Initialize();
-
-browser.runtime.onConnect.addListener((port) => {
-  if (port.name !== "transcription") return;
-
-  port.onMessage.addListener(async (msg) => {
-    if (transcribing) return;
-    if (msg.type == "TRANSCRIBE") {
-      transcribing = true;
-      console.log("Transcribing");
-      try {
-        const stream = session.streamimg(msg.audioData, ttsOptions);
-        console.log("Stream gained");
-        for await (const segment of stream) {
-        segments.push(segment);
-        }
-    
-
-
-      } catch (err) {
-        console.log(err);
-      }
-
-      console.log("Done transcribing");
-    //transcribing = false;
+    if (contexts.length > 0) {
+      console.log("Offscreen document already exists");
+      return;
     }
-  });
+  } else {
+    // Fallback for older Chrome versions
+    const clients = await self.clients.matchAll();
+    if (clients.some((client) => client.url.includes(chrome.runtime.id))) {
+      return;
+    }
+  }
+
+  // Create offscreen document
+  if (!creatingOffscreen) {
+    creatingOffscreen = chrome.offscreen.createDocument({
+      url: "build/offscreen.html",
+      reasons: ["WORKERS"],
+      justification:
+        "Maintain persistent data structures for extension functionality",
+    });
+
+    await creatingOffscreen;
+    creatingOffscreen = null;
+    console.log("Offscreen document created successfully");
+  } else {
+    await creatingOffscreen;
+  }
+}
+
+// Create offscreen on browser startup
+chrome.runtime.onStartup.addListener(() => {
+  EnsureOffscreen();
+  console.log("Extension started, offscreen document ensured");
+});
+
+// Create offscreen on extension installation
+chrome.runtime.onInstalled.addListener(() => {
+  EnsureOffscreen();
+  console.log("Extension installed, offscreen document created");
+});
+
+// Handle messages (from content script) to ensure offscreen exists
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg && msg.type === "ensure_offscreen") {
+    EnsureOffscreen()
+      .then(() => sendResponse({ ok: true }))
+      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+    return true;
+  }
 });
