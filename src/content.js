@@ -1,4 +1,3 @@
-
 function GetVideo() {
   return document.querySelector("video");
 }
@@ -24,3 +23,4 @@ async function Initialize() {
 }
 
 Initialize();
+

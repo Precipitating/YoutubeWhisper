@@ -614,8 +614,7 @@ const ModelTypes = {
 let whisper = null;
 let modelManager = null;
 let session = null;
-let transcribing = false;
-const URL = chrome.runtime.getURL("src/audiopreprocessor.js");
+chrome.runtime.getURL("src/offscreen.html");
 function LoadWhisper() {
   whisper = new A({ logLevel: 1 });
   modelManager = new F();
@@ -735,19 +734,12 @@ async function Initialize() {
   }
 }
 
+function handleMessages(message) {
+  if (message.type == "VIDEO_PLAY") {
+    GetAudioData();
+    console.log("VIDEO_PLAY");
+  }
+}
+
 Initialize();
-
-chrome.runtime.onConnect.addListener((port) => {
-  if (port.name !== "transcription") return;
-
-  port.onMessage.addListener(async (msg) => {
-    if (transcribing) return;
-    if (msg.type == "VIDEO_PLAY") {
-      transcribing = true;
-      console.log("Transcribing");
-      await GetAudioData();
-      console.log("Done transcribing");
-      //transcribing = false;
-    }
-  });
-});
+chrome.runtime.onMessage.addListener(handleMessages);

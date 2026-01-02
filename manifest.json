@@ -8,7 +8,13 @@
     "default_popup": "src/popup.html"
   },
 
-  "permissions": ["storage", "activeTab", "tabCapture", "scripting", "offscreen"],
+  "permissions": [
+    "storage",
+    "activeTab",
+    "tabCapture",
+    "scripting",
+    "offscreen"
+  ],
   "host_permissions": ["*://www.youtube.com/*"],
 
   "background": {
@@ -18,13 +24,13 @@
   "content_scripts": [
     {
       "matches": ["*://www.youtube.com/watch*"],
-      "js": ["src/content.js"]
+      "js": ["build/content.js"]
     }
   ],
 
   "web_accessible_resources": [
     {
-      "resources": ["src/audiopreprocessor.js"],
+      "resources": ["src/audiopreprocessor.js", "build/offscreen.js"],
       "matches": ["*://www.youtube.com/*"]
     }
   ],

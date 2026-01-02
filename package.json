@@ -3,7 +3,8 @@
     "start": "rollup -c"
   },
   "dependencies": {
-    "@timur00kh/whisper.wasm": "^0.0.7-canary.af8cb6a"
+    "@timur00kh/whisper.wasm": "^0.0.7-canary.af8cb6a",
+    "whisper-web-transcriber": "^0.2.5"
   },
   "devDependencies": {
     "@rollup/plugin-commonjs": "^29.0.0",
